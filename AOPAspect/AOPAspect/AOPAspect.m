@@ -124,7 +124,11 @@ static AOPAspect *aspectManager = NULL;
     IMP implementation;
     
     if ([[aClass instanceMethodSignatureForSelector:aSelector] methodReturnLength] > sizeof(double)) {
+#ifndef __arm64__
         implementation = class_getMethodImplementation_stret([self class], [self extendedSelectorWithClass:aClass selector:aSelector]);
+#else
+        implementation = class_getMethodImplementation([self class], [self extendedSelectorWithClass:aClass selector:aSelector]);
+#endif
     }
     else {
         implementation = class_getMethodImplementation([self class], [self extendedSelectorWithClass:aClass selector:aSelector]);
@@ -140,7 +144,11 @@ static AOPAspect *aspectManager = NULL;
     
     // Check method return type
     if ([[aClass instanceMethodSignatureForSelector:aSelector] methodReturnLength] > sizeof(double)) {
+#ifndef __arm64__
         implementation = (IMP)_objc_msgForward_stret;
+#else
+        implementation = (IMP)_objc_msgForward;
+#endif
     }
     else {
         implementation = (IMP)_objc_msgForward;
@@ -205,10 +213,22 @@ static AOPAspect *aspectManager = NULL;
         
         // Get the original method implementation
         if ([methodSignature methodReturnLength] > sizeof(double)) {
+#ifndef __arm64__
             implementation = class_getMethodImplementation_stret(aClass, aSelector);
+#else
+            implementation = class_getMethodImplementation(aClass, aSelector);
+#endif
         }
         else {
             implementation = class_getMethodImplementation(aClass, aSelector);
+            
+            if (implementation) {
+                IMP inheritedImp = imp_implementationWithBlock(^(){
+                    void (*func)(id, SEL) = (void *)implementation;
+                    func(self, aSelector);
+                });
+                class_addMethod(aClass, aSelector, inheritedImp,  method_getTypeEncoding(method));
+            }
         }
 
         [self interceptMethodWithClass:aClass selector:aSelector];
@@ -317,7 +337,9 @@ static AOPAspect *aspectManager = NULL;
         SEL extendedForwardingMethodSelector = [[AOPAspect instance] extendedSelectorWithClass:[self class] selector:@selector(forwardingTargetForSelector:)];
         
         // Invoke the original forwardingTargetForSelector method
-        return method_invoke([AOPAspect instance], class_getInstanceMethod([AOPAspect class], extendedForwardingMethodSelector), aSelector);
+        IMP methodInstance = [AOPAspect instanceMethodForSelector:extendedForwardingMethodSelector];
+        void (*func)(id, SEL) = (void *)methodInstance;
+        func([AOPAspect instance], aSelector);
     }
     
     // Store the current class
